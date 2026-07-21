@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<title>Tablero avance de ventas</title>
+<title>Tablero avance de comerciales</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:wght@700;800&family=Outfit:wght@400;500;600&family=IBM+Plex+Mono:wght@400;600&display=swap" rel="stylesheet">
 <style>
@@ -258,7 +258,7 @@ svg{display:block;width:100%;overflow:visible}
 
 <header>
   <div class="brand">
-    <h1>Tablero avance de <b>ventas</b></h1>
+    <h1>Tablero avance de <b>comerciales</b></h1>
     <div class="sub"><span class="dot"></span><span id="periodo"></span></div>
   </div>
   <div style="display:flex;align-items:center;gap:14px">
@@ -626,7 +626,8 @@ function calcPendientesFiltered(){
         fecha:fd,total:0,
         rso:String(r['RSO']||'').trim(),
         rubro:String(r['RUBRO']||'OTROS').trim(),
-        emp:String(r['EMPRESA PEDIDO']||'').trim()
+        emp:String(r['EMPRESA PEDIDO']||'').trim(),
+        vendedor:String(r['VENDEDOR']||'').trim()
       };
     }
     peds[num].total+=total;
@@ -636,7 +637,7 @@ function calcPendientesFiltered(){
   for(const k in peds){
     const p=peds[k];
     const dias=Math.floor((today-p.fecha)/86400000);
-    PEND_LIST.push({num:k,fecha:p.fecha,dias,rso:p.rso,rubro:p.rubro,emp:p.emp,total:p.total});
+    PEND_LIST.push({num:k,fecha:p.fecha,dias,rso:p.rso,rubro:p.rubro,emp:p.emp,total:p.total,vendedor:p.vendedor});
     if(dias<=45){cntOk++;vtaOk+=p.total;}else{cntAl++;vtaAl+=p.total;}
   }
   PEND_DATA={cntOk,vtaOk,cntAl,vtaAl,tot:cntOk+cntAl};
@@ -800,16 +801,15 @@ function renderPendientesPorComercial(){
   });
   const grouped={};
   rowsMes.forEach(p=>{
-    const ejec=getEjecFromName(p.rso)||'Sin asignar';
-    const cliKey=p.rso||'(sin cliente)';
-    if(!grouped[ejec])grouped[ejec]={};
-    grouped[ejec][cliKey]=(grouped[ejec][cliKey]||0)+p.total;
+    const ejec=p.vendedor||'Sin asignar';
+    if(!grouped[ejec])grouped[ejec]=[];
+    grouped[ejec].push(p);
   });
   const fmtV=v=>Math.round(v).toLocaleString('es-AR');
-  let grupos=Object.entries(grouped).map(([ejec,clientes])=>{
-    const arr=Object.entries(clientes).map(([cli,vta])=>({cli,vta})).filter(x=>x.vta!==0);
-    arr.sort((a,b)=>b.vta-a.vta);
-    const totVta=arr.reduce((s,x)=>s+x.vta,0);
+  const mn2=['Ene','Feb','Mar','Abr','May','Jun','Jul','Ago','Sep','Oct','Nov','Dic'];
+  let grupos=Object.entries(grouped).map(([ejec,peds])=>{
+    const arr=peds.filter(p=>p.total!==0).slice().sort((a,b)=>b.dias-a.dias);
+    const totVta=arr.reduce((s,x)=>s+x.total,0);
     return {ejec,arr,totVta};
   }).filter(g=>g.arr.length);
   const sorters={ejec:(a,b)=>a.ejec.localeCompare(b.ejec,'es'),vta:(a,b)=>a.totVta-b.totVta};
@@ -818,9 +818,12 @@ function renderPendientesPorComercial(){
   const arrow=col=>pendComSortCol===col?(pendComSortDir==='asc'?' ▲':' ▼'):'';
   const thCol=col=>pendComSortCol===col?'var(--acc)':'var(--tx)';
   const cols=[
-    {key:'ejec',label:'COMERCIAL',w:'16%',align:'left',sortable:true},
-    {key:null, label:'CLIENTE',w:'60%',align:'left',sortable:false},
-    {key:'vta',label:'IMPORTE DE VENTA',w:'24%',align:'right',sortable:true}
+    {key:'ejec',label:'COMERCIAL',w:'13%',align:'left',sortable:true},
+    {key:null, label:'FECHA',w:'11%',align:'center',sortable:false},
+    {key:null, label:'N° PEDIDO',w:'13%',align:'left',sortable:false},
+    {key:null, label:'CLIENTE',w:'27%',align:'left',sortable:false},
+    {key:null, label:'DÍAS',w:'10%',align:'center',sortable:false},
+    {key:'vta',label:'IMPORTE',w:'26%',align:'right',sortable:true}
   ];
   const theadHtml=`<thead><tr style="border-bottom:1px solid var(--line2)">
     ${cols.map(c=>`<th ${c.sortable?`data-col="${c.key}"`:''} style="padding:5px 8px;text-align:${c.align};font-weight:600;${c.sortable?'cursor:pointer;user-select:none;':''}position:sticky;top:0;background:var(--panel2);z-index:2;color:${c.sortable?thCol(c.key):'var(--tx)'}">${c.label}${c.sortable?arrow(c.key):''}</th>`).join('')}
@@ -829,16 +832,23 @@ function renderPendientesPorComercial(){
     const isOpen=pendComExpanded.has(g.ejec);
     const arrowIcon=isOpen?'▼':'▶';
     const groupRow=`<tr class="pendcom-group-row" data-ejec="${g.ejec}" style="cursor:pointer;font-weight:700;border-bottom:1px solid var(--line2)">
-      <td colspan="2" style="padding:6px 8px"><span style="display:inline-block;width:14px;color:var(--mut)">${arrowIcon}</span>${g.ejec}</td>
+      <td colspan="5" style="padding:6px 8px"><span style="display:inline-block;width:14px;color:var(--mut)">${arrowIcon}</span>${g.ejec}</td>
       <td style="padding:6px 8px;text-align:right;font-family:'IBM Plex Mono',monospace">$${fmtV(g.totVta)}</td>
     </tr>`;
-    const subRows=g.arr.map(x=>`<tr class="pendcom-sub-row" data-ejec="${g.ejec}" style="${isOpen?'':'display:none;'}background:rgba(128,128,128,.04);border-bottom:1px solid var(--line)">
+    const subRows=g.arr.map(p=>{
+      const fechaStr=`${p.fecha.getDate()} ${mn2[p.fecha.getMonth()]} ${p.fecha.getFullYear()}`;
+      const diaCol=p.dias>45?'#f87171':'var(--tx)';
+      return `<tr class="pendcom-sub-row" data-ejec="${g.ejec}" style="${isOpen?'':'display:none;'}background:rgba(128,128,128,.04);border-bottom:1px solid var(--line)">
       <td style="padding:4px 8px 4px 28px"></td>
-      <td style="padding:4px 8px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${x.cli}</td>
-      <td style="padding:4px 8px;text-align:right;font-family:'IBM Plex Mono',monospace">$${fmtV(x.vta)}</td>
-    </tr>`).join('');
+      <td style="padding:4px 8px;text-align:center;font-family:'IBM Plex Mono',monospace;white-space:nowrap">${fechaStr}</td>
+      <td style="padding:4px 8px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;font-family:'IBM Plex Mono',monospace">${p.num}</td>
+      <td style="padding:4px 8px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${p.rso||'—'}</td>
+      <td style="padding:4px 8px;text-align:center;font-family:'IBM Plex Mono',monospace;color:${diaCol}">${p.dias}</td>
+      <td style="padding:4px 8px;text-align:right;font-family:'IBM Plex Mono',monospace">$${fmtV(p.total)}</td>
+    </tr>`;
+    }).join('');
     return groupRow+subRows;
-  }).join('')||'<tr><td colspan="3" style="padding:8px;font-size:12px;color:var(--mut)">Sin datos</td></tr>';
+  }).join('')||'<tr><td colspan="6" style="padding:8px;font-size:12px;color:var(--mut)">Sin datos</td></tr>';
   wrap.innerHTML=`<table class="tbl" style="width:100%;border-collapse:collapse;table-layout:fixed;font-size:11.5px">
     <colgroup>${cols.map(c=>`<col style="width:${c.w}">`).join('')}</colgroup>
     ${theadHtml}
@@ -1010,4 +1020,4 @@ function toggleTheme(){
 </script>
 </body>
 </html>
-<!-- 01 - Comerciales Seguimiento - version inicial: nuevo dashboard standalone, independiente del "Dashboard ventas REM 2026" (numeracion propia desde 01, arranca de cero para esta familia de archivos). Se partio del archivo 74 vigente y se conservo intacta toda la infraestructura de datos (fetch a las 4 solapas de Google Sheets, parseCsvText, processRawRows con el criterio de venta activa Firmada+Ingresada+Reparto+Transito, processClientRows con la resolucion de cliente Activo por sobre Inactivo/Suspendido/Incobrable, processProductRows, processPendientesRows/calcPendientesFiltered, CLIENT_LOOKUP/CLIENT_NAME_LOOKUP/getEjecFromRawCli/getEjecFromName/normName, EMP_GRUPOS y los filtros de Periodo/Empresa/Rubro) para que las tablas de comerciales sigan resolviendo exactamente igual que en el dashboard general. Se dejo en el HTML solamente: el header con toggle de tema e indicador de empresa, la barra de filtros superior (Periodo/Empresa/Rubro + boton Actualizar datos), y las 3 secciones de comerciales en el mismo orden que el dashboard general (Seguimiento comerciales/Venta por comercial, Remitos por comercial - Firmados, Pendientes por comercial). Se quitaron del HTML: KPIs, Pedidos pendientes de facturar, Cumplimiento por fabrica (avance diario y mensual), Estado de remito, Ranking/Evolucion mensual/Margen bruto/Top clientes/Top productos/Mix por rubro y empresa/Mapa mensual, Utilidad negativa y Utilidad clientes. En el JS se eliminaron las funciones que sólo alimentaban esas secciones (renderRanking, renderMonth, renderClientes, renderProductos, renderMargen, renderEstados, renderMix, renderMatrix, makeGaugeSVG, getOrigVta, getOrigVtaHastaDia, countWorkingDaysUntil, renderGauges, renderGaugesDiario, renderPendientes, togglePendDetalle, renderPendientesDetalle, renderUtilidadNegativa, renderUtilidadClientes) y se simplificaron render()/calcPendientesFiltered()/toggleTheme()/processRawRows() quitando las llamadas a esas funciones ya inexistentes, para evitar errores en tiempo de ejecucion. El objetivo es que los comerciales puedan revisar su propio avance de ventas sin ver el resto del tablero interno. -->
+<!-- 05 - Comerciales Seguimiento - titulo tablero avance de comerciales: se cambia el titulo de la pestana del navegador y el h1 principal de "Tablero avance de ventas" a "Tablero avance de comerciales", para diferenciarlo claramente del dashboard general (que sigue llamandose "Tablero avance de ventas"). Sin cambios de logica ni de datos. -->
