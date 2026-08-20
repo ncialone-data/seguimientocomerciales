@@ -297,6 +297,14 @@ svg{display:block;width:100%;overflow:visible}
   <button class="clear-btn hide" id="clearRubBtn">× Quitar rubro</button>
 </div>
 
+<div class="card" style="margin-top:14px;margin-bottom:14px" id="utilAnualCard">
+  <div class="c-head">
+    <span class="c-title">Utilidad anual por comercial</span>
+    <span class="c-note" id="utilAnualNote"></span>
+  </div>
+  <div id="utilAnualWrap"></div>
+</div>
+
 <div class="card" style="margin-top:14px;margin-bottom:14px" id="comCard">
   <div class="c-head">
     <span class="c-title">Seguimiento comerciales</span>
@@ -381,6 +389,7 @@ function render(){
   document.getElementById('clearRubBtn').classList.toggle('hide',!rubFilter);
   renderComerciales();
   renderRemitosPorComercial();
+  renderUtilidadAnualComercial();
   renderPendientesPorComercial();
   renderDetalleComercialNote();
   if(PEND_RAW)calcPendientesFiltered();
@@ -590,6 +599,9 @@ let remSortCol='vta'; let remSortDir='desc'; // orden tabla "Remitos por comerci
 const remExpanded=new Set(); // comerciales expandidos en "Remitos por comercial"
 let pendComSortCol='vta'; let pendComSortDir='desc'; // orden tabla "Pendientes por comercial" (historico completo)
 const pendComExpanded=new Set(); // comerciales expandidos en "Pendientes por comercial" (historico completo)
+// Orden tabla "Utilidad anual por comercial": arranca por Utilidad de mayor a menor; al hacer clic en un encabezado
+// (Comercial o Util Año) por primera vez ordena ascendente, y alternando en clics siguientes (asc/desc).
+let utilAnualSortCol='util'; let utilAnualSortDir='desc';
 const PROD_LOOKUP={};
 const CLIENT_LOOKUP={}; // { codigoCliente → ejecutivo }
 const CLIENT_NAME_LOOKUP={}; // { nombreNormalizado → ejecutivo } — para cruzar por razón social (ej: pendientes)
@@ -706,12 +718,12 @@ function getEjecFromName(name){
 function renderRemitosPorComercial(){
   const wrap=document.getElementById('remComercialWrap');
   if(!wrap)return;
-  const curMes=MESES[MESES.length-1];
-  if(!curMes){ wrap.innerHTML=''; return; }
+  if(!MESES.length){ wrap.innerHTML=''; return; }
   const passFE=d=>(!empGrupoFilter||(EMP_GRUPOS[empGrupoFilter]||[]).includes(d.emp))
     &&(!empFilter||d.emp===empFilter)
     &&(!rubFilter||d.rub===rubFilter);
-  const rowsFirm=EJEC_ROWS.filter(d=>d.mes===curMes&&d.estado==='Firmada'&&passFE(d));
+  // Respeta el mes elegido en el filtro de periodo; si esta en "Todo el ano" (mesFilter null), acumula todos los meses cargados.
+  const rowsFirm=EJEC_ROWS.filter(d=>(mesFilter?d.mes===mesFilter:true)&&d.estado==='Firmada'&&passFE(d));
   const grouped={};
   rowsFirm.forEach(d=>{
     const ejec=getEjecFromRawCli(d.rawcli)||'Sin asignar';
@@ -783,6 +795,82 @@ function renderRemitosPorComercial(){
       const col=th.dataset.col;
       if(remSortCol===col){ remSortDir=remSortDir==='asc'?'desc':'asc'; } else { remSortCol=col; remSortDir='desc'; }
       renderRemitosPorComercial();
+    };
+  });
+}
+
+// Tabla fija de utilidad % mes a mes por comercial, para el año completo (Ene→Ago, o los meses que haya cargados).
+// A proposito NO usa mesFilter (no cambia con el filtro de Periodo); si respeta Empresa y Rubro.
+function renderUtilidadAnualComercial(){
+  const wrap=document.getElementById('utilAnualWrap');
+  const note=document.getElementById('utilAnualNote');
+  if(!wrap)return;
+  if(!MESES.length){ wrap.innerHTML=''; if(note)note.textContent=''; return; }
+  const passFE=d=>(!empGrupoFilter||(EMP_GRUPOS[empGrupoFilter]||[]).includes(d.emp))
+    &&(!empFilter||d.emp===empFilter)
+    &&(!rubFilter||d.rub===rubFilter);
+  const rowsFirm=EJEC_ROWS.filter(d=>d.estado==='Firmada'&&passFE(d));
+  const mesesOrdenados=[...MESES].sort();
+  if(note)note.textContent=`${MLBL[mesesOrdenados[0]]||mesesOrdenados[0]}–${MLBL[mesesOrdenados[mesesOrdenados.length-1]]||mesesOrdenados[mesesOrdenados.length-1]} · Firmados · fijo (no cambia con el filtro de período)`;
+  const grouped={};
+  rowsFirm.forEach(d=>{
+    const ejec=getEjecFromRawCli(d.rawcli)||'Sin asignar';
+    if(!grouped[ejec])grouped[ejec]={};
+    if(!grouped[ejec][d.mes])grouped[ejec][d.mes]={vta:0,cos:0};
+    grouped[ejec][d.mes].vta+=d.vta;
+    grouped[ejec][d.mes].cos+=d.cos;
+  });
+  const utilColor=pct=>pct<40?'#f87171':pct<50?'#d97706':'#4ade80';
+  let filas=Object.entries(grouped).map(([ejec,meses])=>{
+    let totVta=0,totCos=0;
+    const porMes={};
+    mesesOrdenados.forEach(m=>{
+      const d=meses[m];
+      if(d&&d.vta){
+        porMes[m]={pct:(d.vta-d.cos)/d.vta*100};
+        totVta+=d.vta; totCos+=d.cos;
+      } else {
+        porMes[m]=null;
+      }
+    });
+    const totUtil=totVta?(totVta-totCos)/totVta*100:0;
+    return {ejec,porMes,totUtil};
+  }).filter(f=>Object.values(f.porMes).some(Boolean));
+  const sorters={ejec:(a,b)=>a.ejec.localeCompare(b.ejec,'es'),util:(a,b)=>a.totUtil-b.totUtil};
+  const cmp=sorters[utilAnualSortCol]||sorters.util;
+  filas.sort((a,b)=>utilAnualSortDir==='asc'?cmp(a,b):-cmp(a,b));
+  const arrow=col=>utilAnualSortCol===col?(utilAnualSortDir==='asc'?' ▲':' ▼'):'';
+  const thCol=col=>utilAnualSortCol===col?'var(--acc)':'var(--tx)';
+  const nMeses=mesesOrdenados.length;
+  const wMes=nMeses?(60/nMeses):8;
+  const cols=[{key:'ejec',label:'COMERCIAL',w:'18%',align:'left',sortable:true}]
+    .concat(mesesOrdenados.map(m=>({key:null,label:(MLBL[m]||m).toUpperCase(),w:`${wMes.toFixed(2)}%`,align:'right',sortable:false})))
+    .concat([{key:'util',label:'UTIL AÑO',w:'22%',align:'right',sortable:true}]);
+  const theadHtml=`<thead><tr style="border-bottom:1px solid var(--line2)">
+    ${cols.map(c=>`<th ${c.sortable?`data-col="${c.key}"`:''} style="padding:5px 6px;text-align:${c.align};font-weight:600;${c.sortable?'cursor:pointer;user-select:none;':''}position:sticky;top:0;background:var(--panel2);z-index:2;color:${c.sortable?thCol(c.key):'var(--tx)'}">${c.label}${c.sortable?arrow(c.key):''}</th>`).join('')}
+  </tr></thead>`;
+  const bodyHtml=filas.map(f=>{
+    const mesCells=mesesOrdenados.map(m=>{
+      const d=f.porMes[m];
+      if(!d)return `<td style="padding:6px 6px;text-align:right;font-family:'IBM Plex Mono',monospace;color:var(--mut2)">—</td>`;
+      return `<td style="padding:6px 6px;text-align:right;font-family:'IBM Plex Mono',monospace">${d.pct.toFixed(0)}%</td>`;
+    }).join('');
+    return `<tr style="border-bottom:1px solid var(--line)">
+      <td style="padding:6px 8px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;font-weight:600">${f.ejec}</td>
+      ${mesCells}
+      <td style="padding:6px 8px;text-align:right;font-family:'IBM Plex Mono',monospace;font-weight:700;color:${utilColor(f.totUtil)}">${f.totUtil.toFixed(0)}%</td>
+    </tr>`;
+  }).join('')||`<tr><td colspan="${cols.length}" style="padding:8px;font-size:12px;color:var(--mut)">Sin datos</td></tr>`;
+  wrap.innerHTML=`<table class="tbl" style="width:100%;border-collapse:collapse;table-layout:fixed;font-size:11.5px">
+    <colgroup>${cols.map(c=>`<col style="width:${c.w}">`).join('')}</colgroup>
+    ${theadHtml}
+    <tbody>${bodyHtml}</tbody>
+  </table>`;
+  wrap.querySelectorAll('th[data-col]').forEach(th=>{
+    th.onclick=()=>{
+      const col=th.dataset.col;
+      if(utilAnualSortCol===col){ utilAnualSortDir=utilAnualSortDir==='asc'?'desc':'asc'; } else { utilAnualSortCol=col; utilAnualSortDir='asc'; }
+      renderUtilidadAnualComercial();
     };
   });
 }
@@ -871,8 +959,7 @@ function renderPendientesPorComercial(){
 }
 
 function renderDetalleComercialNote(){
-  const curMes=MESES[MESES.length-1];
-  const txt=curMes?(MLBL[curMes]||curMes):'';
+  const txt=mesFilter?(MLBL[mesFilter]||mesFilter):'todo el año · acumulado';
   const n1=document.getElementById('remComercialNote'); if(n1)n1.textContent=txt;
   const n2=document.getElementById('pendComercialNote'); if(n2)n2.textContent='histórico completo';
 }
@@ -1021,3 +1108,7 @@ function toggleTheme(){
 </body>
 </html>
 <!-- 05 - Comerciales Seguimiento - titulo tablero avance de comerciales: se cambia el titulo de la pestana del navegador y el h1 principal de "Tablero avance de ventas" a "Tablero avance de comerciales", para diferenciarlo claramente del dashboard general (que sigue llamandose "Tablero avance de ventas"). Sin cambios de logica ni de datos. -->
+<!-- 06 - Comerciales Seguimiento - remitos por comercial segun mes filtrado: la seccion "Remitos por comercial · Firmados" ya no muestra siempre el ultimo mes con datos (antes fijo, ej. agosto); ahora respeta el mes elegido en el filtro de Periodo (si se elige Julio, muestra los remitos firmados de Julio, y asi con cualquier mes anterior). Cuando el filtro esta en "Todo el ano" (sin mes puntual), la seccion acumula los remitos firmados de todos los meses cargados, en vez de mostrar solo uno. El texto junto al titulo de la seccion ahora indica el mes activo o "todo el ano · acumulado". Sin cambios en "Pendientes por comercial" (sigue siendo historico completo, no depende del mes). -->
+<!-- 07 - Comerciales Seguimiento - utilidad anual por comercial: nueva seccion "Utilidad anual por comercial", ubicada justo debajo de "Remitos por comercial · Firmados". Tabla con una fila por vendedor y una columna por cada mes cargado (Ene, Feb, Mar, Abr, May, Jun, Jul, Ago), mostrando solo el % de utilidad de ese vendedor en ese mes (remitos en estado Firmada), mas una columna final "UTIL AÑO" con el % de utilidad acumulado del ano completo. A proposito esta tabla ignora el filtro de Periodo (mes) -siempre muestra el ano completo-, pero si respeta los filtros de Empresa y Rubro. Orden inicial: por UTIL AÑO de mayor a menor. Los encabezados "COMERCIAL" y "UTIL AÑO" son clickeables: el primer clic en un encabezado ordena ascendente, el siguiente clic sobre el mismo encabezado alterna a descendente (y asi sucesivamente). Las columnas mensuales no son clickeables (solo muestran el dato). Sin cambios en el resto de las secciones. -->
+<!-- 08 - Comerciales Seguimiento - orden secciones utilidad anual arriba: se mueve la seccion "Utilidad anual por comercial" para que quede primera, justo debajo de toda la barra de filtros (Periodo/Empresa/Rubro) y antes de "Seguimiento comerciales". Nuevo orden de secciones: Utilidad anual por comercial, Seguimiento comerciales (Venta por comercial), Remitos por comercial · Firmados, Pendientes por comercial. Es un cambio puramente de orden/maquetado (se movio el bloque HTML); no se toco logica, calculos ni el resto de las secciones. -->
+
