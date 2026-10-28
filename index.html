@@ -506,7 +506,7 @@ function processRawRows(rawRows, sourceName) {
       if(!CLI_AGG[mes][_cliKey].prods[_prodFull])CLI_AGG[mes][_cliKey].prods[_prodFull]={vta:0,cos:0};
       CLI_AGG[mes][_cliKey].prods[_prodFull].vta+=vta;
       CLI_AGG[mes][_cliKey].prods[_prodFull].cos+=cos;
-      EJEC_ROWS.push({mes,rawcli:_rawcli,emp,rub,vta,cos,estado});
+      EJEC_ROWS.push({mes,rawcli:_rawcli,emp,rub,vta,cos,estado,pcode:_pcode,prod:_prodFull.slice(_prodFull.split(/\s+/)[0].length).trim()});
     }
     const key = `${mes}|${cli}|${rub}|${estado}|${emp}`;
     if(!agg[key])agg[key]={mes,cli,rub,estado,emp,vta:0,cos:0,qty:0};
@@ -628,6 +628,7 @@ let pendSortCol='total'; // columna activa de orden
 let pendSortDir='desc'; // 'asc' | 'desc'
 let remSortCol='vta'; let remSortDir='desc'; // orden tabla "Remitos por comercial"
 const remExpanded=new Set(); // comerciales expandidos en "Remitos por comercial"
+const remCliExpanded=new Set(); // clientes expandidos (comercial|cliente) para ver sus productos en "Remitos por comercial"
 let pendComSortCol='vta'; let pendComSortDir='desc'; // orden tabla "Pendientes por comercial" (historico completo)
 const pendComExpanded=new Set(); // comerciales expandidos en "Pendientes por comercial" (historico completo)
 // Orden tabla "Utilidad anual por comercial": arranca por Utilidad de mayor a menor; al hacer clic en un encabezado
@@ -768,14 +769,19 @@ function renderRemitosPorComercial(){
   rowsFirm.forEach(d=>{
     const ejec=getEjecFromRawCli(d.rawcli)||'Sin asignar';
     if(!grouped[ejec])grouped[ejec]={};
-    if(!grouped[ejec][d.rawcli])grouped[ejec][d.rawcli]={vta:0,cos:0};
+    if(!grouped[ejec][d.rawcli])grouped[ejec][d.rawcli]={vta:0,cos:0,prods:{}};
     grouped[ejec][d.rawcli].vta+=d.vta;
     grouped[ejec][d.rawcli].cos+=d.cos;
+    const _pk=d.pcode||'(sin codigo)';
+    if(!grouped[ejec][d.rawcli].prods[_pk])grouped[ejec][d.rawcli].prods[_pk]={pcode:_pk,prod:d.prod||'',vta:0,cos:0};
+    grouped[ejec][d.rawcli].prods[_pk].vta+=d.vta;
+    grouped[ejec][d.rawcli].prods[_pk].cos+=d.cos;
   });
   const fmtV=v=>Math.round(v).toLocaleString('es-AR');
   const utilColor=pct=>pct<40?'#f87171':pct<50?'#d97706':'#4ade80';
+  const escA=t=>String(t).replace(/&/g,'&amp;').replace(/"/g,'&quot;').replace(/</g,'&lt;');
   let grupos=Object.entries(grouped).map(([ejec,clientes])=>{
-    const arr=Object.entries(clientes).map(([cli,v])=>({cli,vta:v.vta,cos:v.cos})).filter(x=>x.vta!==0||x.cos!==0);
+    const arr=Object.entries(clientes).map(([cli,v])=>({cli,vta:v.vta,cos:v.cos,prods:Object.values(v.prods).filter(p=>p.vta!==0||p.cos!==0).sort((a,b)=>b.vta-a.vta)})).filter(x=>x.vta!==0||x.cos!==0);
     arr.sort((a,b)=>b.vta-a.vta);
     const totVta=arr.reduce((s,x)=>s+x.vta,0);
     const totCos=arr.reduce((s,x)=>s+x.cos,0);
@@ -808,13 +814,26 @@ function renderRemitosPorComercial(){
     </tr>`;
     const subRows=g.arr.map(x=>{
       const util=x.vta?(x.vta-x.cos)/x.vta*100:0;
-      return `<tr class="rem-sub-row" data-ejec="${g.ejec}" style="${isOpen?'':'display:none;'}background:rgba(128,128,128,.04);border-bottom:1px solid var(--line)">
+      const ck=g.ejec+'|'+x.cli;
+      const cliOpen=isOpen&&remCliExpanded.has(ck);
+      const cliRow=`<tr class="rem-sub-row rem-cli-row" data-ejec="${escA(g.ejec)}" data-k="${escA(ck)}" style="${isOpen?'':'display:none;'}cursor:pointer;background:rgba(128,128,128,.04);border-bottom:1px solid var(--line)">
         <td style="padding:4px 8px 4px 28px"></td>
-        <td style="padding:4px 8px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${x.cli}</td>
+        <td style="padding:4px 8px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis"><span style="display:inline-block;width:14px;color:var(--mut)">${remCliExpanded.has(ck)?'▼':'▶'}</span>${x.cli}</td>
         <td style="padding:4px 8px;text-align:right;font-family:'IBM Plex Mono',monospace">$${fmtV(x.vta)}</td>
         <td style="padding:4px 8px;text-align:right;font-family:'IBM Plex Mono',monospace">$${fmtV(x.cos)}</td>
         <td style="padding:4px 8px;text-align:right;font-family:'IBM Plex Mono',monospace;font-weight:700;color:${utilColor(util)}">${util.toFixed(0)}%</td>
       </tr>`;
+      const prodRows=x.prods.map(p=>{
+        const pu=p.vta?(p.vta-p.cos)/p.vta*100:0;
+        return `<tr class="rem-prod-row" data-ejec="${escA(g.ejec)}" data-k="${escA(ck)}" style="${cliOpen?'':'display:none;'}background:rgba(128,128,128,.09);border-bottom:1px solid var(--line);font-size:11px">
+        <td style="padding:3px 8px"></td>
+        <td style="padding:3px 8px 3px 42px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis"><span style="font-family:'IBM Plex Mono',monospace;color:var(--mut)">${p.pcode}</span> ${p.prod}</td>
+        <td style="padding:3px 8px;text-align:right;font-family:'IBM Plex Mono',monospace">$${fmtV(p.vta)}</td>
+        <td style="padding:3px 8px;text-align:right;font-family:'IBM Plex Mono',monospace">$${fmtV(p.cos)}</td>
+        <td style="padding:3px 8px;text-align:right;font-family:'IBM Plex Mono',monospace;font-weight:700;color:${utilColor(pu)}">${pu.toFixed(0)}%</td>
+      </tr>`;
+      }).join('');
+      return cliRow+prodRows;
     }).join('');
     return groupRow+subRows;
   }).join('')||'<tr><td colspan="5" style="padding:8px;font-size:12px;color:var(--mut)">Sin datos</td></tr>';
@@ -827,6 +846,13 @@ function renderRemitosPorComercial(){
     tr.onclick=()=>{
       const ejec=tr.dataset.ejec;
       if(remExpanded.has(ejec))remExpanded.delete(ejec); else remExpanded.add(ejec);
+      renderRemitosPorComercial();
+    };
+  });
+  wrap.querySelectorAll('.rem-cli-row').forEach(tr=>{
+    tr.onclick=()=>{
+      const k=tr.dataset.k;
+      if(remCliExpanded.has(k))remCliExpanded.delete(k); else remCliExpanded.add(k);
       renderRemitosPorComercial();
     };
   });
@@ -1328,3 +1354,4 @@ function toggleTheme(){
 <!-- 08 - Comerciales Seguimiento - orden secciones utilidad anual arriba: se mueve la seccion "Utilidad anual por comercial" para que quede primera, justo debajo de toda la barra de filtros (Periodo/Empresa/Rubro) y antes de "Seguimiento comerciales". Nuevo orden de secciones: Utilidad anual por comercial, Seguimiento comerciales (Venta por comercial), Remitos por comercial · Firmados, Pendientes por comercial. Es un cambio puramente de orden/maquetado (se movio el bloque HTML); no se toco logica, calculos ni el resto de las secciones. -->
 <!-- 10 - Comerciales Seguimiento - seccion inmovilizados sobrestock separada: se agrega la seccion "Inmovilizados / Sobrestock" (ultima del reporte) con los 19 codigos de producto del archivo SOBRESTOCK.xlsx (lista fija SOBRESTOCK_COD en el HTML; se ignora la fila rotulo "9 / FAMILIA: CARTON"). Esos codigos se detectan por el primer termino de la columna PRODUCTO del remito y se EXCLUYEN por completo de Utilidad anual, Seguimiento comerciales, Remitos por comercial y del resumen del encabezado, para no distorsionar la utilidad de los vendedores (premios por efectividad). La nueva seccion usa el mismo criterio de Firmada + comercial por cliente: (1) tabla comercial x mes con UTIL AÑO (fija, ignora Periodo) y (2) venta/costo/util % por comercial con detalle por producto (respeta Periodo) y total; ambas respetan Empresa y Rubro. Pendientes por comercial queda sin cambios (esa solapa no trae producto). -->
 <!-- 11 - Comerciales Seguimiento - listado productos sobrestock por mes y vendedor: se agrega, justo debajo de "Inmovilizados / Sobrestock", la seccion "Sobrestock · detalle por código" con el listado completo de los 19 codigos (aunque no tengan ventas) en la primera columna, las unidades vendidas por cada mes y la utilidad % al final (con total general). A diferencia de la tabla anual de la v10, esta seccion SI respeta el filtro de Periodo: con un mes elegido (ej. Septiembre) muestra solo ese mes; en "Todo el año" muestra una columna por mes mas TOTAL UNID. Al hacer clic en un codigo se despliegan los vendedores que lo vendieron con cantidad, importe de venta, costo y utilidad %. Solo remitos Firmados, respeta Empresa y Rubro, y los codigos siguen excluidos del resto del reporte. Sin cambios en las demas secciones. -->
+<!-- 12 - Comerciales Seguimiento - productos por cliente en remitos por comercial: en "Remitos por comercial · Firmados", ademas de expandir cada comercial para ver sus clientes, ahora al hacer clic en un cliente se despliega el listado de codigo y producto que se le remitio en el periodo filtrado (mes elegido, o todo el año acumulado), con importe de venta, costo y utilidad % por producto. Mismo criterio de filtros (Periodo, Empresa, Rubro) y solo remitos Firmados; los codigos de sobrestock siguen excluidos de esta seccion. Sin cambios en las demas secciones. -->
