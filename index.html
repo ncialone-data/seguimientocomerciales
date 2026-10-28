@@ -331,6 +331,25 @@ svg{display:block;width:100%;overflow:visible}
   </div>
   <div id="pendComercialWrap"></div>
 </div>
+
+<div class="card" style="margin-top:14px;margin-bottom:14px" id="sobreCard">
+  <div class="c-head">
+    <span class="c-title">Inmovilizados / Sobrestock</span>
+    <span class="c-note" id="sobreNote"></span>
+  </div>
+  <div class="com-sub">Utilidad % por mes (todo el año · fijo)</div>
+  <div id="sobreAnualWrap"></div>
+  <div class="com-sub" style="margin-top:20px">Detalle por comercial y producto</div>
+  <div id="sobreDetWrap"></div>
+</div>
+
+<div class="card" style="margin-top:14px;margin-bottom:14px" id="sobreProdCard">
+  <div class="c-head">
+    <span class="c-title">Sobrestock · detalle por código</span>
+    <span class="c-note" id="sobreProdNote"></span>
+  </div>
+  <div id="sobreProdWrap"></div>
+</div>
 </div>
 <div id="tip"></div>
 <script>
@@ -391,6 +410,8 @@ function render(){
   renderRemitosPorComercial();
   renderUtilidadAnualComercial();
   renderPendientesPorComercial();
+  renderSobrestock();
+  renderSobrestockProductos();
   renderDetalleComercialNote();
   if(PEND_RAW)calcPendientesFiltered();
 }
@@ -406,6 +427,7 @@ function processRawRows(rawRows, sourceName) {
   REMS_RAW.length=0;
   for(const k in CLI_AGG)delete CLI_AGG[k];
   EJEC_ROWS.length=0;
+  SOBRE_ROWS.length=0;
   for(const k in ORIG_AGG)delete ORIG_AGG[k];
   for(const k in ORIG_DAYAGG)delete ORIG_DAYAGG[k];
   const _seenComp=new Set();
@@ -440,6 +462,15 @@ function processRawRows(rawRows, sourceName) {
     if(comp&&!_seenComp.has(_ck)){_seenComp.add(_ck);REMS_RAW.push({comp,estado,mes,emp,rawcli});}
     const cos = _n(r['COSTO IMPORTE']);
     const qty = _n(r['CANTIDAD']);
+    // Sobrestock: se separa y NO entra a ningun otro calculo del reporte
+    {
+      const _pf=String(r['PRODUCTO']||'').trim();
+      const _pc=_pf.split(/\s+/)[0].toUpperCase();
+      if(SOBRESTOCK_COD.has(_pc)){
+        if(['Firmada','Ingresada','Reparto','Transito'].includes(estado))SOBRE_ROWS.push({mes,rawcli,emp,rub,vta,cos,qty,estado,pcode:_pc,prod:_pf.slice(_pc.length).trim()});
+        continue;
+      }
+    }
     if(['Firmada','Ingresada','Reparto','Transito'].includes(estado)){
       if(!DAYAGG[mes])DAYAGG[mes]={};
       DAYAGG[mes][dayNum]=(DAYAGG[mes][dayNum]||0)+vta;
@@ -602,6 +633,15 @@ const pendComExpanded=new Set(); // comerciales expandidos en "Pendientes por co
 // Orden tabla "Utilidad anual por comercial": arranca por Utilidad de mayor a menor; al hacer clic en un encabezado
 // (Comercial o Util Año) por primera vez ordena ascendente, y alternando en clics siguientes (asc/desc).
 let utilAnualSortCol='util'; let utilAnualSortDir='desc';
+// Productos inmovilizados / sobrestock (SOBRESTOCK.xlsx): se EXCLUYEN de todas las demas secciones y se muestran solo en "Inmovilizados / Sobrestock".
+const SOBRESTOCK_COD=new Set(['MC0380', 'MC0483', 'MC0224', 'LA0079', 'LA0078', 'LP0176', 'LP0175', 'LP0177', 'LP0179', 'LP0178', 'LP0188', 'LP0183', 'LP0187', 'LP0185', 'LP0181', 'LP0182', 'LP0186', 'LP0184', 'LT0163']);
+const SOBRE_ROWS=[]; // filas de remitos de productos sobrestock: {mes,rawcli,emp,rub,vta,cos,estado,pcode,prod}
+let sobreSortCol='vta'; let sobreSortDir='desc';
+let sobreAnualSortCol='util'; let sobreAnualSortDir='desc';
+const sobreExpanded=new Set();
+const SOBRE_NOMBRES={'MC0380': 'CAJA CARTON MARRON NAVIDEÑA x 25 und', 'MC0483': 'CAJA CARTON NAVIDEÑA MARRON x 25 und  ac', 'MC0224': 'CAJA DE CARTON NAVIDEÑA  BLANCA x 25 und', 'LA0079': 'AYUDIN ANTIHONGOS REMOV ACTIVO DOYPACK 450 ML', 'LA0078': 'AYUDIN BAÑO LIMPIEZA ACTIVA DOYPACK 450 ML', 'LP0176': 'POETT DESINF FLORES DE PRIMAVERA 900 ML', 'LP0175': 'POETT DESINF FRESCURA DE LAVANDA 900 ML', 'LP0177': 'POETT DESINF SOLO PARA TI 900 ML', 'LP0179': 'POETT DESINF SUAV. DE ALGODON 900 ML', 'LP0178': 'POETT DESINF SUAV. DE BEBE 900 ML', 'LP0188': 'POETT MULTI AMBIENTES AERO ALEGRA TU DÍA 360CC', 'LP0183': 'POETT MULTI AMBIENTES AERO BEBE 360CC', 'LP0187': 'POETT MULTI AMBIENTES AERO DESPER DE ENERGÍA 360', 'LP0185': 'POETT MULTI AMBIENTES AERO ESPIRITU PLAY 360CC', 'LP0181': 'POETT MULTI AMBIENTES AERO LAVANDA 360CC', 'LP0182': 'POETT MULTI AMBIENTES AERO PRIMAVERA 360CC', 'LP0186': 'POETT MULTI AMBIENTES AERO SOLO PARA TI 360CC', 'LP0184': 'POETT MULTI AMBIENTES AERO SUAV DE ALGODÓN 360CC', 'LT0163': 'TRENET DOYPACK 400ML'}; // codigo -> descripcion (SOBRESTOCK.xlsx)
+let sobreProdSortCol='cod'; let sobreProdSortDir='asc';
+const sobreProdExpanded=new Set();
 const PROD_LOOKUP={};
 const CLIENT_LOOKUP={}; // { codigoCliente → ejecutivo }
 const CLIENT_NAME_LOOKUP={}; // { nombreNormalizado → ejecutivo } — para cruzar por razón social (ej: pendientes)
@@ -875,6 +915,181 @@ function renderUtilidadAnualComercial(){
   });
 }
 
+// Seccion aparte: productos inmovilizados / sobrestock. Estos codigos NO entran en ninguna otra seccion.
+// Tabla 1: % utilidad comercial x mes (fija, ignora Periodo). Tabla 2: venta/costo/util por comercial con detalle por producto (respeta Periodo).
+// Ambas respetan Empresa y Rubro y usan solo remitos Firmados (mismo criterio que Utilidad anual / Remitos).
+function renderSobrestock(){
+  const wrapA=document.getElementById('sobreAnualWrap');
+  const wrapD=document.getElementById('sobreDetWrap');
+  const note=document.getElementById('sobreNote');
+  if(!wrapA||!wrapD)return;
+  const passFE=d=>(!empGrupoFilter||(EMP_GRUPOS[empGrupoFilter]||[]).includes(d.emp))
+    &&(!empFilter||d.emp===empFilter)
+    &&(!rubFilter||d.rub===rubFilter);
+  const base=SOBRE_ROWS.filter(d=>d.estado==='Firmada'&&passFE(d));
+  const meses=[...new Set(base.map(d=>d.mes))].sort();
+  if(note)note.textContent=`${SOBRESTOCK_COD.size} códigos · Firmados · excluidos del resto del reporte`;
+  const utilColor=pct=>pct<40?'#f87171':pct<50?'#d97706':'#4ade80';
+  const fmtV=v=>Math.round(v).toLocaleString('es-AR');
+  const mono="font-family:'IBM Plex Mono',monospace";
+  if(!base.length){
+    const msg='<div style="font-size:12px;color:var(--mut)">Sin datos</div>';
+    wrapA.innerHTML=msg; wrapD.innerHTML=msg; return;
+  }
+  // ---- Tabla 1: comercial x mes ----
+  const g1={};
+  base.forEach(d=>{
+    const e=getEjecFromRawCli(d.rawcli)||'Sin asignar';
+    if(!g1[e])g1[e]={};
+    if(!g1[e][d.mes])g1[e][d.mes]={vta:0,cos:0};
+    g1[e][d.mes].vta+=d.vta; g1[e][d.mes].cos+=d.cos;
+  });
+  let filas=Object.entries(g1).map(([ejec,ms])=>{
+    let tv=0,tc=0; const porMes={};
+    meses.forEach(m=>{const x=ms[m];if(x&&x.vta){porMes[m]=(x.vta-x.cos)/x.vta*100;tv+=x.vta;tc+=x.cos;}else porMes[m]=null;});
+    return {ejec,porMes,totUtil:tv?(tv-tc)/tv*100:0};
+  }).filter(f=>Object.values(f.porMes).some(v=>v!==null));
+  const s1={ejec:(a,b)=>a.ejec.localeCompare(b.ejec,'es'),util:(a,b)=>a.totUtil-b.totUtil};
+  const c1=s1[sobreAnualSortCol]||s1.util;
+  filas.sort((a,b)=>sobreAnualSortDir==='asc'?c1(a,b):-c1(a,b));
+  const ar1=c=>sobreAnualSortCol===c?(sobreAnualSortDir==='asc'?' ▲':' ▼'):'';
+  const th1=c=>sobreAnualSortCol===c?'var(--acc)':'var(--tx)';
+  const wMes=meses.length?(60/meses.length):8;
+  const cols1=[{key:'ejec',label:'COMERCIAL',w:'18%',align:'left',sortable:true}]
+    .concat(meses.map(m=>({key:null,label:(MLBL[m]||m).toUpperCase(),w:`${wMes.toFixed(2)}%`,align:'right',sortable:false})))
+    .concat([{key:'util',label:'UTIL AÑO',w:'22%',align:'right',sortable:true}]);
+  const head1=`<thead><tr style="border-bottom:1px solid var(--line2)">${cols1.map(c=>`<th ${c.sortable?`data-col="${c.key}"`:''} style="padding:5px 6px;text-align:${c.align};font-weight:600;${c.sortable?'cursor:pointer;user-select:none;':''}position:sticky;top:0;background:var(--panel2);z-index:2;color:${c.sortable?th1(c.key):'var(--tx)'}">${c.label}${c.sortable?ar1(c.key):''}</th>`).join('')}</tr></thead>`;
+  const body1=filas.map(f=>`<tr style="border-bottom:1px solid var(--line)"><td style="padding:6px 8px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;font-weight:600">${f.ejec}</td>${meses.map(m=>f.porMes[m]===null?`<td style="padding:6px 6px;text-align:right;${mono};color:var(--mut2)">—</td>`:`<td style="padding:6px 6px;text-align:right;${mono}">${f.porMes[m].toFixed(0)}%</td>`).join('')}<td style="padding:6px 8px;text-align:right;${mono};font-weight:700;color:${utilColor(f.totUtil)}">${f.totUtil.toFixed(0)}%</td></tr>`).join('');
+  wrapA.innerHTML=`<table class="tbl" style="width:100%;border-collapse:collapse;table-layout:fixed;font-size:11.5px"><colgroup>${cols1.map(c=>`<col style="width:${c.w}">`).join('')}</colgroup>${head1}<tbody>${body1}</tbody></table>`;
+  wrapA.querySelectorAll('th[data-col]').forEach(th=>{
+    th.onclick=()=>{const col=th.dataset.col;if(sobreAnualSortCol===col){sobreAnualSortDir=sobreAnualSortDir==='asc'?'desc':'asc';}else{sobreAnualSortCol=col;sobreAnualSortDir='asc';}renderSobrestock();};
+  });
+  // ---- Tabla 2: comercial -> producto (respeta Periodo) ----
+  const rowsP=base.filter(d=>mesFilter?d.mes===mesFilter:true);
+  const g2={};
+  rowsP.forEach(d=>{
+    const e=getEjecFromRawCli(d.rawcli)||'Sin asignar';
+    if(!g2[e])g2[e]={};
+    const k=d.pcode;
+    if(!g2[e][k])g2[e][k]={pcode:d.pcode,prod:d.prod,vta:0,cos:0};
+    g2[e][k].vta+=d.vta; g2[e][k].cos+=d.cos;
+  });
+  let grupos=Object.entries(g2).map(([ejec,prods])=>{
+    const arr=Object.values(prods).filter(x=>x.vta!==0||x.cos!==0).sort((a,b)=>b.vta-a.vta);
+    const totVta=arr.reduce((t,x)=>t+x.vta,0), totCos=arr.reduce((t,x)=>t+x.cos,0);
+    return {ejec,arr,totVta,totCos,totUtil:totVta?(totVta-totCos)/totVta*100:0};
+  }).filter(g=>g.arr.length);
+  const s2={ejec:(a,b)=>a.ejec.localeCompare(b.ejec,'es'),vta:(a,b)=>a.totVta-b.totVta,cos:(a,b)=>a.totCos-b.totCos,util:(a,b)=>a.totUtil-b.totUtil};
+  const c2=s2[sobreSortCol]||s2.vta;
+  grupos.sort((a,b)=>sobreSortDir==='asc'?c2(a,b):-c2(a,b));
+  const ar2=c=>sobreSortCol===c?(sobreSortDir==='asc'?' ▲':' ▼'):'';
+  const th2=c=>sobreSortCol===c?'var(--acc)':'var(--tx)';
+  const cols2=[
+    {key:'ejec',label:'COMERCIAL',w:'16%',align:'left',sortable:true},
+    {key:null,label:'PRODUCTO',w:'44%',align:'left',sortable:false},
+    {key:'vta',label:'IMPORTE DE VENTA',w:'14%',align:'right',sortable:true},
+    {key:'cos',label:'COSTO',w:'14%',align:'right',sortable:true},
+    {key:'util',label:'UTIL %',w:'12%',align:'right',sortable:true}
+  ];
+  const head2=`<thead><tr style="border-bottom:1px solid var(--line2)">${cols2.map(c=>`<th ${c.sortable?`data-col="${c.key}"`:''} style="padding:5px 8px;text-align:${c.align};font-weight:600;${c.sortable?'cursor:pointer;user-select:none;':''}position:sticky;top:0;background:var(--panel2);z-index:2;color:${c.sortable?th2(c.key):'var(--tx)'}">${c.label}${c.sortable?ar2(c.key):''}</th>`).join('')}</tr></thead>`;
+  let body2=grupos.map(g=>{
+    const open=sobreExpanded.has(g.ejec);
+    const gr=`<tr class="sobre-group-row" data-ejec="${g.ejec}" style="cursor:pointer;font-weight:700;border-bottom:1px solid var(--line2)"><td colspan="2" style="padding:6px 8px"><span style="display:inline-block;width:14px;color:var(--mut)">${open?'▼':'▶'}</span>${g.ejec}</td><td style="padding:6px 8px;text-align:right;${mono}">$${fmtV(g.totVta)}</td><td style="padding:6px 8px;text-align:right;${mono}">$${fmtV(g.totCos)}</td><td style="padding:6px 8px;text-align:right;${mono};color:${utilColor(g.totUtil)}">${g.totUtil.toFixed(0)}%</td></tr>`;
+    const sub=g.arr.map(x=>{const u=x.vta?(x.vta-x.cos)/x.vta*100:0;return `<tr style="${open?'':'display:none;'}background:rgba(128,128,128,.04);border-bottom:1px solid var(--line)"><td style="padding:4px 8px 4px 28px"></td><td style="padding:4px 8px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis"><span style="${mono};color:var(--mut)">${x.pcode}</span> ${x.prod}</td><td style="padding:4px 8px;text-align:right;${mono}">$${fmtV(x.vta)}</td><td style="padding:4px 8px;text-align:right;${mono}">$${fmtV(x.cos)}</td><td style="padding:4px 8px;text-align:right;${mono};font-weight:700;color:${utilColor(u)}">${u.toFixed(0)}%</td></tr>`;}).join('');
+    return gr+sub;
+  }).join('')||'<tr><td colspan="5" style="padding:8px;font-size:12px;color:var(--mut)">Sin datos en el período</td></tr>';
+  if(grupos.length>1){
+    const tv=grupos.reduce((t,g)=>t+g.totVta,0), tc=grupos.reduce((t,g)=>t+g.totCos,0), tu=tv?(tv-tc)/tv*100:0;
+    body2+=`<tr style="font-weight:700;border-top:2px solid var(--line2)"><td colspan="2" style="padding:6px 8px">TOTAL SOBRESTOCK · ${mesFilter?(MLBL[mesFilter]||mesFilter):'todo el año'}</td><td style="padding:6px 8px;text-align:right;${mono}">$${fmtV(tv)}</td><td style="padding:6px 8px;text-align:right;${mono}">$${fmtV(tc)}</td><td style="padding:6px 8px;text-align:right;${mono};color:${utilColor(tu)}">${tu.toFixed(0)}%</td></tr>`;
+  }
+  wrapD.innerHTML=`<table class="tbl" style="width:100%;border-collapse:collapse;table-layout:fixed;font-size:11.5px"><colgroup>${cols2.map(c=>`<col style="width:${c.w}">`).join('')}</colgroup>${head2}<tbody>${body2}</tbody></table>`;
+  wrapD.querySelectorAll('.sobre-group-row').forEach(tr=>{
+    tr.onclick=()=>{const e=tr.dataset.ejec;if(sobreExpanded.has(e))sobreExpanded.delete(e);else sobreExpanded.add(e);renderSobrestock();};
+  });
+  wrapD.querySelectorAll('th[data-col]').forEach(th=>{
+    th.onclick=()=>{const col=th.dataset.col;if(sobreSortCol===col){sobreSortDir=sobreSortDir==='asc'?'desc':'asc';}else{sobreSortCol=col;sobreSortDir='desc';}renderSobrestock();};
+  });
+}
+
+// Listado completo de codigos sobrestock: unidades vendidas por mes + utilidad. SI respeta el filtro de Periodo (mes elegido, o todos los meses si "Todo el año").
+// Clic en un codigo -> vendedores que lo vendieron (cantidad, venta, costo, util %). Solo remitos Firmados; respeta Empresa y Rubro.
+function renderSobrestockProductos(){
+  const wrap=document.getElementById('sobreProdWrap');
+  const note=document.getElementById('sobreProdNote');
+  if(!wrap)return;
+  const passFE=d=>(!empGrupoFilter||(EMP_GRUPOS[empGrupoFilter]||[]).includes(d.emp))
+    &&(!empFilter||d.emp===empFilter)
+    &&(!rubFilter||d.rub===rubFilter);
+  const rows=SOBRE_ROWS.filter(d=>d.estado==='Firmada'&&passFE(d)&&(mesFilter?d.mes===mesFilter:true));
+  const meses=mesFilter?[mesFilter]:[...MESES].sort();
+  if(note)note.textContent=`${Object.keys(SOBRE_NOMBRES).length} códigos · ${mesFilter?(MLBL[mesFilter]||mesFilter):'todo el año'} · unidades y utilidad · Firmados`;
+  const fmtV=v=>Math.round(v).toLocaleString('es-AR');
+  const fmtQ=v=>v.toLocaleString('es-AR',{maximumFractionDigits:1});
+  const utilColor=pct=>pct<40?'#f87171':pct<50?'#d97706':'#4ade80';
+  const mono="font-family:'IBM Plex Mono',monospace";
+  const prods={};
+  Object.keys(SOBRE_NOMBRES).forEach(c=>prods[c]={cod:c,nom:SOBRE_NOMBRES[c],porMes:{},qty:0,vta:0,cos:0,vend:{}});
+  rows.forEach(d=>{
+    const p=prods[d.pcode]; if(!p)return;
+    p.porMes[d.mes]=(p.porMes[d.mes]||0)+d.qty;
+    p.qty+=d.qty; p.vta+=d.vta; p.cos+=d.cos;
+    const e=getEjecFromRawCli(d.rawcli)||'Sin asignar';
+    if(!p.vend[e])p.vend[e]={e,qty:0,vta:0,cos:0};
+    p.vend[e].qty+=d.qty; p.vend[e].vta+=d.vta; p.vend[e].cos+=d.cos;
+  });
+  let lista=Object.values(prods);
+  lista.forEach(p=>{p.util=p.vta?(p.vta-p.cos)/p.vta*100:null;});
+  const sorters={
+    cod:(a,b)=>a.cod.localeCompare(b.cod,'es'),
+    qty:(a,b)=>a.qty-b.qty,
+    util:(a,b)=>(a.util===null?-Infinity:a.util)-(b.util===null?-Infinity:b.util)
+  };
+  const cmp=sorters[sobreProdSortCol]||sorters.cod;
+  lista.sort((a,b)=>sobreProdSortDir==='asc'?cmp(a,b):-cmp(a,b));
+  const arrow=c=>sobreProdSortCol===c?(sobreProdSortDir==='asc'?' ▲':' ▼'):'';
+  const thCol=c=>sobreProdSortCol===c?'var(--acc)':'var(--tx)';
+  const nM=meses.length;
+  const wMes=nM?(36/nM):8;
+  const cols=[{key:'cod',label:'CÓDIGO · PRODUCTO',w:'40%',align:'left',sortable:true}]
+    .concat(meses.map(m=>({key:null,label:(MLBL[m]||m).toUpperCase(),w:`${wMes.toFixed(2)}%`,align:'right',sortable:false})));
+  if(nM>1)cols.push({key:'qty',label:'TOTAL UNID',w:'12%',align:'right',sortable:true});
+  cols.push({key:'util',label:'UTIL %',w:'12%',align:'right',sortable:true});
+  const head=`<thead><tr style="border-bottom:1px solid var(--line2)">${cols.map(c=>`<th ${c.sortable?`data-col="${c.key}"`:''} style="padding:5px 8px;text-align:${c.align};font-weight:600;${c.sortable?'cursor:pointer;user-select:none;':''}position:sticky;top:0;background:var(--panel2);z-index:2;color:${c.sortable?thCol(c.key):'var(--tx)'}">${c.label}${c.sortable?arrow(c.key):''}</th>`).join('')}</tr></thead>`;
+  const nCols=cols.length;
+  const utilCell=u=>u===null?`<td style="padding:6px 8px;text-align:right;${mono};color:var(--mut2)">—</td>`:`<td style="padding:6px 8px;text-align:right;${mono};font-weight:700;color:${utilColor(u)}">${u.toFixed(0)}%</td>`;
+  let body=lista.map(p=>{
+    const open=sobreProdExpanded.has(p.cod);
+    const tiene=p.qty!==0||p.vta!==0;
+    const mesCells=meses.map(m=>p.porMes[m]?`<td style="padding:6px 8px;text-align:right;${mono}">${fmtQ(p.porMes[m])}</td>`:`<td style="padding:6px 8px;text-align:right;${mono};color:var(--mut2)">—</td>`).join('');
+    const main=`<tr class="sobreprod-row" data-cod="${p.cod}" style="${tiene?'cursor:pointer;':'opacity:.55;'}border-bottom:1px solid var(--line2)">
+      <td style="padding:6px 8px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis"><span style="display:inline-block;width:14px;color:var(--mut)">${tiene?(open?'▼':'▶'):''}</span><span style="${mono};font-weight:700">${p.cod}</span> ${p.nom}</td>
+      ${mesCells}
+      ${nM>1?`<td style="padding:6px 8px;text-align:right;${mono};font-weight:700">${p.qty?fmtQ(p.qty):'—'}</td>`:''}
+      ${utilCell(p.util)}
+    </tr>`;
+    if(!tiene||!open)return main;
+    const vend=Object.values(p.vend).filter(v=>v.qty!==0||v.vta!==0).sort((a,b)=>b.vta-a.vta);
+    const sub=`<tr style="background:rgba(128,128,128,.06)"><td colspan="${nCols}" style="padding:4px 8px 8px 28px">
+      <table style="width:100%;border-collapse:collapse;table-layout:fixed;font-size:11.5px">
+        <colgroup><col style="width:30%"><col style="width:14%"><col style="width:20%"><col style="width:20%"><col style="width:16%"></colgroup>
+        <thead><tr style="border-bottom:1px solid var(--line)"><th style="padding:4px 8px;text-align:left;font-weight:600;color:var(--mut)">VENDEDOR</th><th style="padding:4px 8px;text-align:right;font-weight:600;color:var(--mut)">CANTIDAD</th><th style="padding:4px 8px;text-align:right;font-weight:600;color:var(--mut)">IMPORTE DE VENTA</th><th style="padding:4px 8px;text-align:right;font-weight:600;color:var(--mut)">COSTO</th><th style="padding:4px 8px;text-align:right;font-weight:600;color:var(--mut)">UTIL %</th></tr></thead>
+        <tbody>${vend.map(v=>{const u=v.vta?(v.vta-v.cos)/v.vta*100:0;return `<tr style="border-bottom:1px solid var(--line)"><td style="padding:4px 8px;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${v.e}</td><td style="padding:4px 8px;text-align:right;${mono}">${fmtQ(v.qty)}</td><td style="padding:4px 8px;text-align:right;${mono}">$${fmtV(v.vta)}</td><td style="padding:4px 8px;text-align:right;${mono}">$${fmtV(v.cos)}</td><td style="padding:4px 8px;text-align:right;${mono};font-weight:700;color:${utilColor(u)}">${u.toFixed(0)}%</td></tr>`;}).join('')}</tbody>
+      </table></td></tr>`;
+    return main+sub;
+  }).join('');
+  const tq=lista.reduce((t,p)=>t+p.qty,0), tv=lista.reduce((t,p)=>t+p.vta,0), tc=lista.reduce((t,p)=>t+p.cos,0);
+  const tu=tv?(tv-tc)/tv*100:null;
+  const totMes=meses.map(m=>`<td style="padding:6px 8px;text-align:right;${mono}">${fmtQ(lista.reduce((t,p)=>t+(p.porMes[m]||0),0))}</td>`).join('');
+  body+=`<tr style="font-weight:700;border-top:2px solid var(--line2)"><td style="padding:6px 8px">TOTAL</td>${totMes}${nM>1?`<td style="padding:6px 8px;text-align:right;${mono}">${fmtQ(tq)}</td>`:''}${utilCell(tu)}</tr>`;
+  wrap.innerHTML=`<table class="tbl" style="width:100%;border-collapse:collapse;table-layout:fixed;font-size:11.5px"><colgroup>${cols.map(c=>`<col style="width:${c.w}">`).join('')}</colgroup>${head}<tbody>${body}</tbody></table>`;
+  wrap.querySelectorAll('.sobreprod-row').forEach(tr=>{
+    tr.onclick=()=>{const c=tr.dataset.cod;if(sobreProdExpanded.has(c))sobreProdExpanded.delete(c);else sobreProdExpanded.add(c);renderSobrestockProductos();};
+  });
+  wrap.querySelectorAll('th[data-col]').forEach(th=>{
+    th.onclick=()=>{const col=th.dataset.col;if(sobreProdSortCol===col){sobreProdSortDir=sobreProdSortDir==='asc'?'desc':'asc';}else{sobreProdSortCol=col;sobreProdSortDir=col==='cod'?'asc':'desc';}renderSobrestockProductos();};
+  });
+}
+
 function renderPendientesPorComercial(){
   const wrap=document.getElementById('pendComercialWrap');
   if(!wrap)return;
@@ -1111,4 +1326,5 @@ function toggleTheme(){
 <!-- 06 - Comerciales Seguimiento - remitos por comercial segun mes filtrado: la seccion "Remitos por comercial · Firmados" ya no muestra siempre el ultimo mes con datos (antes fijo, ej. agosto); ahora respeta el mes elegido en el filtro de Periodo (si se elige Julio, muestra los remitos firmados de Julio, y asi con cualquier mes anterior). Cuando el filtro esta en "Todo el ano" (sin mes puntual), la seccion acumula los remitos firmados de todos los meses cargados, en vez de mostrar solo uno. El texto junto al titulo de la seccion ahora indica el mes activo o "todo el ano · acumulado". Sin cambios en "Pendientes por comercial" (sigue siendo historico completo, no depende del mes). -->
 <!-- 07 - Comerciales Seguimiento - utilidad anual por comercial: nueva seccion "Utilidad anual por comercial", ubicada justo debajo de "Remitos por comercial · Firmados". Tabla con una fila por vendedor y una columna por cada mes cargado (Ene, Feb, Mar, Abr, May, Jun, Jul, Ago), mostrando solo el % de utilidad de ese vendedor en ese mes (remitos en estado Firmada), mas una columna final "UTIL AÑO" con el % de utilidad acumulado del ano completo. A proposito esta tabla ignora el filtro de Periodo (mes) -siempre muestra el ano completo-, pero si respeta los filtros de Empresa y Rubro. Orden inicial: por UTIL AÑO de mayor a menor. Los encabezados "COMERCIAL" y "UTIL AÑO" son clickeables: el primer clic en un encabezado ordena ascendente, el siguiente clic sobre el mismo encabezado alterna a descendente (y asi sucesivamente). Las columnas mensuales no son clickeables (solo muestran el dato). Sin cambios en el resto de las secciones. -->
 <!-- 08 - Comerciales Seguimiento - orden secciones utilidad anual arriba: se mueve la seccion "Utilidad anual por comercial" para que quede primera, justo debajo de toda la barra de filtros (Periodo/Empresa/Rubro) y antes de "Seguimiento comerciales". Nuevo orden de secciones: Utilidad anual por comercial, Seguimiento comerciales (Venta por comercial), Remitos por comercial · Firmados, Pendientes por comercial. Es un cambio puramente de orden/maquetado (se movio el bloque HTML); no se toco logica, calculos ni el resto de las secciones. -->
-
+<!-- 10 - Comerciales Seguimiento - seccion inmovilizados sobrestock separada: se agrega la seccion "Inmovilizados / Sobrestock" (ultima del reporte) con los 19 codigos de producto del archivo SOBRESTOCK.xlsx (lista fija SOBRESTOCK_COD en el HTML; se ignora la fila rotulo "9 / FAMILIA: CARTON"). Esos codigos se detectan por el primer termino de la columna PRODUCTO del remito y se EXCLUYEN por completo de Utilidad anual, Seguimiento comerciales, Remitos por comercial y del resumen del encabezado, para no distorsionar la utilidad de los vendedores (premios por efectividad). La nueva seccion usa el mismo criterio de Firmada + comercial por cliente: (1) tabla comercial x mes con UTIL AÑO (fija, ignora Periodo) y (2) venta/costo/util % por comercial con detalle por producto (respeta Periodo) y total; ambas respetan Empresa y Rubro. Pendientes por comercial queda sin cambios (esa solapa no trae producto). -->
+<!-- 11 - Comerciales Seguimiento - listado productos sobrestock por mes y vendedor: se agrega, justo debajo de "Inmovilizados / Sobrestock", la seccion "Sobrestock · detalle por código" con el listado completo de los 19 codigos (aunque no tengan ventas) en la primera columna, las unidades vendidas por cada mes y la utilidad % al final (con total general). A diferencia de la tabla anual de la v10, esta seccion SI respeta el filtro de Periodo: con un mes elegido (ej. Septiembre) muestra solo ese mes; en "Todo el año" muestra una columna por mes mas TOTAL UNID. Al hacer clic en un codigo se despliegan los vendedores que lo vendieron con cantidad, importe de venta, costo y utilidad %. Solo remitos Firmados, respeta Empresa y Rubro, y los codigos siguen excluidos del resto del reporte. Sin cambios en las demas secciones. -->
