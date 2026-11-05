@@ -632,6 +632,7 @@ let remSortCol='vta'; let remSortDir='desc'; // orden tabla "Remitos por comerci
 const remExpanded=new Set(); // comerciales expandidos en "Remitos por comercial"
 const remCliExpanded=new Set(); // clientes expandidos (comercial|cliente) para ver sus productos en "Remitos por comercial"
 let pendComSortCol='vta'; let pendComSortDir='desc'; // orden tabla "Pendientes por comercial" (historico completo)
+const pendCliExpanded=new Set(); // clientes expandidos (detalle de pedidos/productos) dentro de cada comercial en "Pendientes por comercial"
 const pendComExpanded=new Set(); // comerciales expandidos en "Pendientes por comercial" (historico completo)
 // Orden tabla "Utilidad anual por comercial": arranca por Utilidad de mayor a menor; al hacer clic en un encabezado
 // (Comercial o Util Año) por primera vez ordena ascendente, y alternando en clics siguientes (asc/desc).
@@ -682,17 +683,20 @@ function calcPendientesFiltered(){
         rso:String(r['RSO']||'').trim(),
         rubro:String(r['RUBRO']||'OTROS').trim(),
         emp:String(r['EMPRESA PEDIDO']||'').trim(),
-        vendedor:String(r['VENDEDOR']||'').trim()
+        vendedor:String(r['VENDEDOR']||'').trim(),
+        items:[]
       };
     }
     peds[num].total+=total;
+    {const _cod=String(r['PRO CODIGO']||'').trim(),_pr=String(r['PRODUCTO']||'').trim();
+     if(_cod||_pr)peds[num].items.push({cod:_cod,prod:_pr,cant:_n(r['CANTIDAD']),total:total});}
   }
   let cntOk=0,vtaOk=0,cntAl=0,vtaAl=0;
   PEND_LIST=[];
   for(const k in peds){
     const p=peds[k];
     const dias=Math.floor((today-p.fecha)/86400000);
-    PEND_LIST.push({num:k,fecha:p.fecha,dias,rso:p.rso,rubro:p.rubro,emp:p.emp,total:p.total,vendedor:p.vendedor});
+    PEND_LIST.push({num:k,fecha:p.fecha,dias,rso:p.rso,rubro:p.rubro,emp:p.emp,total:p.total,vendedor:p.vendedor,items:p.items});
     if(dias<=45){cntOk++;vtaOk+=p.total;}else{cntAl++;vtaAl+=p.total;}
   }
   PEND_DATA={cntOk,vtaOk,cntAl,vtaAl,tot:cntOk+cntAl};
@@ -1137,51 +1141,85 @@ function renderPendientesPorComercial(){
     grouped[ejec].push(p);
   });
   const fmtV=v=>Math.round(v).toLocaleString('es-AR');
+  const fmtC=v=>(+v).toLocaleString('es-AR',{maximumFractionDigits:2});
+  const esc=t=>String(t==null?'':t).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
   const mn2=['Ene','Feb','Mar','Abr','May','Jun','Jul','Ago','Sep','Oct','Nov','Dic'];
   let grupos=Object.entries(grouped).map(([ejec,peds])=>{
-    const arr=peds.filter(p=>p.total!==0).slice().sort((a,b)=>b.dias-a.dias);
+    const arr=peds.filter(p=>p.total!==0);
     const totVta=arr.reduce((s,x)=>s+x.total,0);
-    return {ejec,arr,totVta};
+    // agrupar por cliente (razon social normalizada)
+    const cm={};
+    arr.forEach(p=>{
+      const nm=String(p.rso||'').replace(/\s+/g,' ').trim()||'Sin cliente';
+      const k=nm.toUpperCase();
+      if(!cm[k])cm[k]={nombre:nm,peds:[],tot:0,maxDias:0};
+      const c=cm[k]; c.peds.push(p); c.tot+=p.total; if(p.dias>c.maxDias)c.maxDias=p.dias;
+    });
+    const clis=Object.values(cm).sort((a,b)=>b.maxDias-a.maxDias||b.tot-a.tot);
+    clis.forEach(c=>c.peds.sort((a,b)=>b.dias-a.dias||String(a.num).localeCompare(String(b.num))));
+    return {ejec,arr,clis,totVta};
   }).filter(g=>g.arr.length);
   const sorters={ejec:(a,b)=>a.ejec.localeCompare(b.ejec,'es'),vta:(a,b)=>a.totVta-b.totVta};
   const cmp=sorters[pendComSortCol]||sorters.vta;
   grupos.sort((a,b)=>pendComSortDir==='asc'?cmp(a,b):-cmp(a,b));
   const arrow=col=>pendComSortCol===col?(pendComSortDir==='asc'?' ▲':' ▼'):'';
   const thCol=col=>pendComSortCol===col?'var(--acc)':'var(--tx)';
-  const cols=[
-    {key:'ejec',label:'COMERCIAL',w:'13%',align:'left',sortable:true},
-    {key:null, label:'FECHA',w:'11%',align:'center',sortable:false},
-    {key:null, label:'N° PEDIDO',w:'13%',align:'left',sortable:false},
-    {key:null, label:'CLIENTE',w:'27%',align:'left',sortable:false},
-    {key:null, label:'DÍAS',w:'10%',align:'center',sortable:false},
-    {key:'vta',label:'IMPORTE',w:'26%',align:'right',sortable:true}
-  ];
+  // 8 columnas: sangria | FECHA | N° PEDIDO | CODIGO | PRODUCTO | CANTIDAD | DIAS | IMPORTE
+  const widths=['3%','10%','10%','10%','33%','8%','8%','18%'];
+  const thBase='padding:5px 8px;font-weight:600;position:sticky;top:0;background:var(--panel2);z-index:2;';
   const theadHtml=`<thead><tr style="border-bottom:1px solid var(--line2)">
-    ${cols.map(c=>`<th ${c.sortable?`data-col="${c.key}"`:''} style="padding:5px 8px;text-align:${c.align};font-weight:600;${c.sortable?'cursor:pointer;user-select:none;':''}position:sticky;top:0;background:var(--panel2);z-index:2;color:${c.sortable?thCol(c.key):'var(--tx)'}">${c.label}${c.sortable?arrow(c.key):''}</th>`).join('')}
+    <th colspan="6" data-col="ejec" style="${thBase}text-align:left;cursor:pointer;user-select:none;color:${thCol('ejec')}">COMERCIAL / CLIENTE${arrow('ejec')}</th>
+    <th style="${thBase}text-align:center;color:var(--tx)">DÍAS</th>
+    <th data-col="vta" style="${thBase}text-align:right;cursor:pointer;user-select:none;color:${thCol('vta')}">IMPORTE${arrow('vta')}</th>
   </tr></thead>`;
+  const mono="font-family:'IBM Plex Mono',monospace";
   const bodyHtml=grupos.map(g=>{
     const isOpen=pendComExpanded.has(g.ejec);
-    const arrowIcon=isOpen?'▼':'▶';
-    const groupRow=`<tr class="pendcom-group-row" data-ejec="${g.ejec}" style="cursor:pointer;font-weight:700;border-bottom:1px solid var(--line2)">
-      <td colspan="5" style="padding:6px 8px"><span style="display:inline-block;width:14px;color:var(--mut)">${arrowIcon}</span>${g.ejec}</td>
-      <td style="padding:6px 8px;text-align:right;font-family:'IBM Plex Mono',monospace">$${fmtV(g.totVta)}</td>
+    const groupRow=`<tr class="pendcom-group-row" data-ejec="${esc(g.ejec)}" style="cursor:pointer;font-weight:700;border-bottom:1px solid var(--line2)">
+      <td colspan="6" style="padding:6px 8px"><span style="display:inline-block;width:14px;color:var(--mut)">${isOpen?'▼':'▶'}</span>${esc(g.ejec)}</td>
+      <td></td>
+      <td style="padding:6px 8px;text-align:right;${mono}">$${fmtV(g.totVta)}</td>
     </tr>`;
-    const subRows=g.arr.map(p=>{
-      const fechaStr=`${p.fecha.getDate()} ${mn2[p.fecha.getMonth()]} ${p.fecha.getFullYear()}`;
-      const diaCol=p.dias>45?'#f87171':'var(--tx)';
-      return `<tr class="pendcom-sub-row" data-ejec="${g.ejec}" style="${isOpen?'':'display:none;'}background:rgba(128,128,128,.04);border-bottom:1px solid var(--line)">
-      <td style="padding:4px 8px 4px 28px"></td>
-      <td style="padding:4px 8px;text-align:center;font-family:'IBM Plex Mono',monospace;white-space:nowrap">${fechaStr}</td>
-      <td style="padding:4px 8px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;font-family:'IBM Plex Mono',monospace">${p.num}</td>
-      <td style="padding:4px 8px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${p.rso||'—'}</td>
-      <td style="padding:4px 8px;text-align:center;font-family:'IBM Plex Mono',monospace;color:${diaCol}">${p.dias}</td>
-      <td style="padding:4px 8px;text-align:right;font-family:'IBM Plex Mono',monospace">$${fmtV(p.total)}</td>
+    const cliRows=g.clis.map(c=>{
+      const key=g.ejec+'|'+c.nombre;
+      const cliOpen=pendCliExpanded.has(key);
+      const diaCol=c.maxDias>45?'#f87171':'var(--tx)';
+      const cliRow=`<tr class="pendcom-cli-row" data-ejec="${esc(g.ejec)}" data-key="${esc(key)}" style="${isOpen?'':'display:none;'}cursor:pointer;font-weight:600;background:rgba(128,128,128,.04);border-bottom:1px solid var(--line)">
+      <td></td>
+      <td colspan="5" style="padding:4px 8px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis"><span style="display:inline-block;width:14px;color:var(--mut)">${cliOpen?'▼':'▶'}</span>${esc(c.nombre)}</td>
+      <td style="padding:4px 8px;text-align:center;${mono};color:${diaCol}">${c.maxDias}</td>
+      <td style="padding:4px 8px;text-align:right;${mono}">$${fmtV(c.tot)}</td>
     </tr>`;
+      if(!(isOpen&&cliOpen))return cliRow;
+      const tdh='padding:3px 8px;font-weight:600;color:var(--mut);border-bottom:1px solid var(--line)';
+      let det=`<tr class="pendcli-det-row" style="background:rgba(128,128,128,.08)">
+      <td></td>
+      <td style="${tdh}">FECHA</td><td style="${tdh}">N° PEDIDO</td><td style="${tdh}">CÓDIGO</td><td style="${tdh}">PRODUCTO</td>
+      <td style="${tdh};text-align:center">CANTIDAD</td><td style="${tdh};text-align:center">DÍAS</td><td style="${tdh};text-align:right">IMPORTE</td>
+    </tr>`;
+      c.peds.forEach(p=>{
+        const fechaStr=`${p.fecha.getDate()} ${mn2[p.fecha.getMonth()]} ${p.fecha.getFullYear()}`;
+        const dCol=p.dias>45?'#f87171':'var(--tx)';
+        const its=(p.items&&p.items.length)?p.items:[{cod:'',prod:'Sin detalle de productos',cant:null,total:p.total}];
+        its.forEach(it=>{
+          det+=`<tr class="pendcli-det-row" style="background:rgba(128,128,128,.08);border-bottom:1px solid var(--line)">
+      <td></td>
+      <td style="padding:3px 8px;white-space:nowrap;${mono}">${fechaStr}</td>
+      <td style="padding:3px 8px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;${mono}">${esc(p.num)}</td>
+      <td style="padding:3px 8px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;${mono}">${esc(it.cod)||'—'}</td>
+      <td style="padding:3px 8px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis" title="${esc(it.prod)}">${esc(it.prod)||'—'}</td>
+      <td style="padding:3px 8px;text-align:center;${mono}">${it.cant==null?'—':fmtC(it.cant)}</td>
+      <td style="padding:3px 8px;text-align:center;${mono};color:${dCol}">${p.dias}</td>
+      <td style="padding:3px 8px;text-align:right;${mono}">$${fmtV(it.total)}</td>
+    </tr>`;
+        });
+      });
+      return cliRow+det;
     }).join('');
-    return groupRow+subRows;
-  }).join('')||'<tr><td colspan="6" style="padding:8px;font-size:12px;color:var(--mut)">Sin datos</td></tr>';
+    return groupRow+cliRows;
+  }).join('')||'<tr><td colspan="8" style="padding:8px;font-size:12px;color:var(--mut)">Sin datos</td></tr>';
   wrap.innerHTML=`<table class="tbl" style="width:100%;border-collapse:collapse;table-layout:fixed;font-size:11.5px">
-    <colgroup>${cols.map(c=>`<col style="width:${c.w}">`).join('')}</colgroup>
+    <colgroup>${widths.map(w=>`<col style="width:${w}">`).join('')}</colgroup>
     ${theadHtml}
     <tbody>${bodyHtml}</tbody>
   </table>`;
@@ -1189,6 +1227,13 @@ function renderPendientesPorComercial(){
     tr.onclick=()=>{
       const ejec=tr.dataset.ejec;
       if(pendComExpanded.has(ejec))pendComExpanded.delete(ejec); else pendComExpanded.add(ejec);
+      renderPendientesPorComercial();
+    };
+  });
+  wrap.querySelectorAll('.pendcom-cli-row').forEach(tr=>{
+    tr.onclick=()=>{
+      const key=tr.dataset.key;
+      if(pendCliExpanded.has(key))pendCliExpanded.delete(key); else pendCliExpanded.add(key);
       renderPendientesPorComercial();
     };
   });
@@ -1362,3 +1407,5 @@ function toggleTheme(){
 <!-- 15 - Comerciales Seguimiento - utilidad negativa un digito con dos decimales: en todas las secciones con utilidad % (Utilidad anual, Remitos por comercial en comercial/cliente/producto, y las dos de sobrestock incluyendo totales y vendedores), cuando la utilidad es NEGATIVA y de un solo digito (mayor a -10%) se muestra con dos decimales (ej. -0,40%, -7,25%) en vez de redondear a entero (antes -0%); el resto de los valores sigue sin decimales. Funcion fmtUtilPct. Sin otros cambios. -->
 <!-- 16 - Comerciales Seguimiento - sobrestock multiples solapas del excel: se actualiza la lista de productos inmovilizados/sobrestock leyendo TODAS las solapas del SOBRESTOCK.xlsx (BANDEX, PAPELERA, LIMPIEZA, ELITE, EXPANDIDO, ARRANQUES, VASSOI, BOLSAS, CELPACK, COTNYL, COTILLON): 206 codigos unicos (antes 23). Todos se excluyen del resto del reporte (Utilidad anual, Seguimiento comerciales, Remitos por comercial, encabezado) y se incluyen en las dos secciones de sobrestock; Pendientes por comercial los sigue mostrando. El orden alfabetico por codigo en ambas secciones de sobrestock se mantiene (ya implementado en la v14). Sin otros cambios. -->
 <!-- 17 - Comerciales Seguimiento - codigos LB0396 y LB0397 sobrestock: se agregan LB0396 y LB0397 (bolsas de residuos) a la lista de sobrestock segun el SOBRESTOCK.xlsx actualizado (208 codigos unicos, antes 206). Excluidos del resto del reporte (Utilidad anual, Seguimiento comerciales, Remitos por comercial, encabezado) e incluidos en las dos secciones de sobrestock (orden alfabetico por codigo); Pendientes por comercial los sigue mostrando. Sin otros cambios. -->
+<!-- 18 - Comerciales Seguimiento - detalle de productos por pedido en pendientes por comercial: en "Pendientes por comercial", al hacer clic en un pedido/cliente de un comercial se despliega el listado de productos de ese pedido (codigo PRO CODIGO, PRODUCTO, CANTIDAD e IMPORTE por producto = columna TOTAL de la hoja de pendientes), sin desglose de costo ni rentabilidad. Nuevo clic lo vuelve a cerrar; se pueden tener varios pedidos abiertos a la vez. Sin cambios en las demas secciones ni en los filtros. -->
+<!-- 19 - Comerciales Seguimiento - pendientes agrupados por cliente dentro del comercial: en "Pendientes por comercial", al abrir un comercial ahora se listan sus clientes agrupados por razon social (ordenados por dias descendente), cada uno con DIAS = pedido mas antiguo pendiente de ese cliente e IMPORTE = suma de sus pedidos. Al hacer clic en un cliente se abre el detalle con FECHA, N° PEDIDO, CODIGO, PRODUCTO, CANTIDAD, DIAS e IMPORTE por producto (pedidos ordenados por dias descendente). Reemplaza el despliegue por pedido de la v18. Sin cambios en las demas secciones ni en los filtros. -->
